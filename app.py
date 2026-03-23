@@ -179,7 +179,7 @@ if prompt := st.chat_input("Describe the evidence..."):
         with st.spinner("🔍 Examining the evidence..."):
             try:
 
-                API_URL = "https://m25csa013--sherlock-detective-sherlockmodel-generate-web.modal.run"
+                API_URL = "https://m25csa023--sherlock-detective-sherlockmodel-generate-web.modal.run"
 
                 if "YOUR_MODAL_URL_HERE" in API_URL:
                     st.error("⚠️ **System Error:** Modal URL not configured in code.")
