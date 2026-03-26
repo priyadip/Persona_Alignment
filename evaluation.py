@@ -6,10 +6,13 @@ import json
 import random
 from tqdm import tqdm
 import gc
+from collections import Counter
+
+BASE_MODEL_PATH = "./Qwen2.5-7B"
 
 
 class ModelEvaluator:
-    def __init__(self, base_model_name="Qwen/Qwen2.5-7B-Instruct", adapter_path="./sherlock-finetuned"):
+    def __init__(self, base_model_name=BASE_MODEL_PATH, adapter_path="./sherlock-finetuned"):
         self.base_model_name = base_model_name
         self.adapter_path = adapter_path
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,7 +27,7 @@ class ModelEvaluator:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
         )
 
@@ -32,7 +35,7 @@ class ModelEvaluator:
             self.base_model_name,
             device_map="auto",
             quantization_config=bnb_config,
-            torch_dtype=torch.float16
+            torch_dtype=torch.bfloat16
         )
 
         if use_adapter:
@@ -42,34 +45,74 @@ class ModelEvaluator:
         model.eval()
         return model
 
+    def calculate_conditional_perplexity(self, model, prompt, response):
+        """Perplexity on the response tokens only, given the prompt (plain text)"""
+        full_text = f"Human: {prompt}\nSherlock Holmes: {response}\n\n"
+        prompt_text = f"Human: {prompt}\nSherlock Holmes:"
 
-    def calculate_conditional_perplexity(self, model, messages):
-
-        full_text = self.tokenizer.apply_chat_template(messages, tokenize=False)
         full_enc = self.tokenizer(full_text, return_tensors="pt").to(self.device)
-
-        prompt_messages = messages[:-1] 
-        prompt_text = self.tokenizer.apply_chat_template(prompt_messages, tokenize=False)
         prompt_enc = self.tokenizer(prompt_text, return_tensors="pt").to(self.device)
 
         labels = full_enc.input_ids.clone()
-
         labels[:, :prompt_enc.input_ids.shape[1]] = -100
 
         with torch.no_grad():
             outputs = model(input_ids=full_enc.input_ids, labels=labels)
             loss = outputs.loss
 
-        ppl = torch.exp(loss).item()
-        return ppl
+        return torch.exp(loss).item()
 
     def calculate_content_similarity(self, generated, reference):
+        """Jaccard similarity between generated and reference text"""
         g = set(generated.lower().split())
         r = set(reference.lower().split())
-        if not g or not r: return 0.0
+        if not g or not r:
+            return 0.0
         return len(g.intersection(r)) / len(g.union(r))
 
-    def evaluate_dataset(self, dataset_path="data/dataset.jsonl", sample_size=30):
+    def calculate_rouge_l(self, generated, reference):
+        """ROUGE-L score based on longest common subsequence"""
+        def lcs_length(x, y):
+            m, n = len(x), len(y)
+            dp = [[0] * (n + 1) for _ in range(m + 1)]
+            for i in range(1, m + 1):
+                for j in range(1, n + 1):
+                    if x[i-1] == y[j-1]:
+                        dp[i][j] = dp[i-1][j-1] + 1
+                    else:
+                        dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+            return dp[m][n]
+
+        gen_tokens = generated.lower().split()
+        ref_tokens = reference.lower().split()
+
+        if not gen_tokens or not ref_tokens:
+            return 0.0
+
+        lcs = lcs_length(gen_tokens, ref_tokens)
+        precision = lcs / len(gen_tokens) if gen_tokens else 0
+        recall = lcs / len(ref_tokens) if ref_tokens else 0
+
+        if precision + recall == 0:
+            return 0.0
+        return 2 * precision * recall / (precision + recall)
+
+    def calculate_victorian_term_frequency(self, text):
+        """Count frequency of Victorian/Holmesian terms"""
+        victorian_terms = {
+            "deduce", "deduction", "elementary", "observe", "observation",
+            "trifle", "trifles", "indeed", "precisely", "singular",
+            "remarkable", "curious", "affair", "crime", "mystery",
+            "evidence", "clue", "suspect", "witness", "footprint",
+            "tobacco", "ash", "magnifying", "watson", "inspector",
+            "scotland", "yard", "baker", "street", "consulting",
+            "detective", "case", "examine", "investigation", "theory"
+        }
+        words = text.lower().split()
+        count = sum(1 for w in words if w in victorian_terms)
+        return count / len(words) if words else 0.0
+
+    def evaluate_dataset(self, dataset_path="dataset.jsonl", sample_size=30):
         print(f"\nLoading dataset: {dataset_path}")
 
         data = []
@@ -77,52 +120,48 @@ class ModelEvaluator:
             for line in f:
                 try:
                     data.append(json.loads(line))
-                except:
-                    pass
+                except json.JSONDecodeError:
+                    continue
 
         random.seed(42)
         random.shuffle(data)
 
         split_index = int(len(data) * 0.5)
         test_set = data[split_index:]
-        
+
         print(f"Total examples: {len(data)}")
         print(f"Training set (seen): {split_index} examples")
         print(f"Test set (unseen):   {len(test_set)} examples")
 
-        if len(test_set) > sample_size:
-            data = random.sample(test_set, sample_size)
-        else:
-            data = test_set
-
+        data = random.sample(test_set, sample_size) if len(test_set) > sample_size else test_set
         print(f"Evaluating on {len(data)} unseen samples\n")
-
-        results = {
-            "base": {"perplexity": [], "similarity": []},
-            "tuned": {"perplexity": [], "similarity": []}
-        }
 
         model = self.load_model(use_adapter=False)
         print("\nEvaluating Base Model...\n")
-        results["base"] = self._run_eval_loop(model, data)
-        del model ; gc.collect() ; torch.cuda.empty_cache()
+        base_results = self._run_eval_loop(model, data)
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
 
         model = self.load_model(use_adapter=True)
         print("\nEvaluating Fine-Tuned Model...\n")
-        results["tuned"] = self._run_eval_loop(model, data)
-        del model ; gc.collect() ; torch.cuda.empty_cache()
+        tuned_results = self._run_eval_loop(model, data)
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
 
-        return results
+        return {"base": base_results, "tuned": tuned_results}
 
     def _run_eval_loop(self, model, data):
-        metrics = {"perplexity": [], "similarity": []}
-
-        system_prompt = (
-            "You are Sherlock Holmes, expert consulting detective. "
-            "Collect facts, ask clarifying questions, analyze clues, and deduce logically."
-        )
+        metrics = {
+            "perplexity": [],
+            "similarity": [],
+            "rouge_l": [],
+            "victorian_freq": []
+        }
 
         for item in tqdm(data):
+            # Support both dataset formats
             if "messages" in item:
                 prompt = next(m['content'] for m in item["messages"] if m["role"] == "user")
                 reference = next(m['content'] for m in item["messages"] if m["role"] == "assistant")
@@ -130,34 +169,35 @@ class ModelEvaluator:
                 prompt = item["instruction"]
                 reference = item["response"]
 
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ]
+            # Perplexity (plain text, no chat template)
+            try:
+                ppl = self.calculate_conditional_perplexity(model, prompt, reference)
+                metrics["perplexity"].append(ppl)
+            except Exception as e:
+                print(f"Warning: Perplexity calculation failed: {e}")
+                continue
 
-            full_messages = messages + [{"role": "assistant", "content": reference}]
-            ppl = self.calculate_conditional_perplexity(model, full_messages)
-            metrics["perplexity"].append(ppl)
-
-            user_text = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
-            )
-            inputs = self.tokenizer(user_text, return_tensors="pt").to(self.device)
+            # Generation (plain text) - DETERMINISTIC for reproducibility
+            input_text = f"Human: {prompt}\nSherlock Holmes:"
+            inputs = self.tokenizer(input_text, return_tensors="pt").to(self.device)
 
             with torch.no_grad():
                 output = model.generate(
                     **inputs,
                     max_new_tokens=150,
-                    temperature=0.7,
-                    do_sample=True,
+                    do_sample=False,  # Deterministic for reproducible evaluation
                     pad_token_id=self.tokenizer.eos_token_id
                 )
 
             generated = self.tokenizer.decode(output[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+            # Stop at next "Human:" if model keeps going
+            generated = generated.split("Human:")[0].strip()
 
             metrics["similarity"].append(self.calculate_content_similarity(generated, reference))
+            metrics["rouge_l"].append(self.calculate_rouge_l(generated, reference))
+            metrics["victorian_freq"].append(self.calculate_victorian_term_frequency(generated))
 
-        return {k: float(np.mean(v)) for k, v in metrics.items()}
+        return {k: float(np.mean(v)) if v else 0.0 for k, v in metrics.items()}
 
     def print_report(self, results):
         print("\n" + "="*60)
@@ -166,28 +206,24 @@ class ModelEvaluator:
 
         rows = [
             ("Perplexity (lower=better)", "perplexity", False),
-            ("Content Similarity", "similarity", True),
+            ("Content Similarity (Jaccard)", "similarity", True),
+            ("ROUGE-L Score", "rouge_l", True),
+            ("Victorian Term Frequency", "victorian_freq", True),
         ]
 
         for title, key, higher_better in rows:
-            base = results["base"][key]
-            tuned = results["tuned"][key]
-
-            if base != 0:
-                diff = ((tuned - base) / base) * 100
-            else:
-                diff = 0
-
+            base = results["base"].get(key, 0)
+            tuned = results["tuned"].get(key, 0)
+            diff = ((tuned - base) / base) * 100 if base != 0 else 0
             if not higher_better:
                 diff = -diff
-
             print(f"{title:<30} | Base: {base:.4f} | Tuned: {tuned:.4f} | Change: {diff:+.2f}%")
 
         print("="*60)
 
         with open("evaluation_report.json", "w") as f:
             json.dump(results, f, indent=2)
-        print("Results saved to 'evaluation_report.json'")
+        print("Results saved to evaluation_report.json")
 
 
 if __name__ == "__main__":

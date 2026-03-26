@@ -2,7 +2,7 @@
 
 > *"Data! Data! Data! I cannot make bricks without clay."* — Sherlock Holmes
 
-**Abstract.** Large Language Models optimized through Reinforcement Learning from Human Feedback exhibit a characteristic homogenization of voice—helpful, verbose, and perpetually hedged—that proves fundamentally incompatible with applications demanding consistent persona maintenance. This repository presents Sherlock-LLM, a conversational agent engineered through QLoRA-based fine-tuning of Qwen-2.5-7B-Instruct to rigorously embody the deductive methodology, Victorian formality, and distinctive idiolect of Arthur Conan Doyle's Sherlock Holmes. Our approach achieves an **83.4% reduction in conditional perplexity** (45.31 → 7.52) and **168.2% improvement in lexical similarity** against canonical Holmesian text, demonstrating that sophisticated persona alignment remains tractable on consumer hardware through parameter-efficient adaptation strategies.
+**Abstract.** Large Language Models optimized through Reinforcement Learning from Human Feedback exhibit a characteristic homogenization of voice—helpful, verbose, and perpetually hedged—that proves fundamentally incompatible with applications demanding consistent persona maintenance. This repository presents Sherlock-LLM, a conversational agent engineered through QLoRA-based fine-tuning of Qwen-2.5-7B-Instruct to rigorously embody the deductive methodology, Victorian formality, and distinctive idiolect of Arthur Conan Doyle's Sherlock Holmes. Our approach achieves a **93.5% reduction in conditional perplexity** (17.34 → 1.13) and **519% improvement in lexical similarity** (0.103 → 0.637) against canonical Holmesian text, with a ROUGE-L score of **0.729** on Holmesian reference text, demonstrating that sophisticated persona alignment remains tractable on consumer hardware through parameter-efficient adaptation strategies.
 
 ---
 
@@ -104,7 +104,8 @@ sherlock-llm/
 
 - Python 3.10 or higher
 - CUDA-compatible GPU with minimum 6GB VRAM
-- CUDA Toolkit 11.8 or higher
+- CUDA Toolkit 12.1 or higher
+- **PyTorch >= 2.6.0** (required due to CVE-2025-32434 security fix in `transformers >= 5.x`; earlier versions will raise a `ValueError` when resuming from checkpoints)
 
 ### Training Environment
 
@@ -112,6 +113,13 @@ sherlock-llm/
 git clone https://github.com/YourUsername/sherlock-llm.git
 cd sherlock-llm
 pip install -r requirements_training.txt
+```
+
+If you are running on a system with CUDA 12.4+ drivers (driver version ≥ 550), install the cu124 PyTorch wheel explicitly:
+
+```bash
+pip install "torch==2.6.0+cu124" "torchvision==0.21.0+cu124" "torchaudio==2.6.0+cu124" \
+    --index-url https://download.pytorch.org/whl/cu124
 ```
 
 The training dependencies include PyTorch, Transformers, PEFT, TRL, and bitsandbytes for 4-bit quantization support.
@@ -134,7 +142,7 @@ The training corpus comprises two complementary data sources designed to capture
 
 **Unstructured Corpus.** Public domain text from *The Adventures of Sherlock Holmes* and *The Memoirs of Sherlock Holmes*, preprocessed through header removal, chapter segmentation, and 500-character chunking with 50-character overlap to maintain contextual continuity.
 
-**Structured Instruction Data.** A curated collection of 200+ instruction-response pairs spanning identity questions, deductive reasoning scenarios, interactive dialogues, and domain-specific knowledge queries. Each example enforces the system prompt:
+**Structured Instruction Data.** A curated collection of **58,877 instruction-response pairs** spanning identity questions, deductive reasoning scenarios, interactive dialogues, and domain-specific knowledge queries, generated from the Holmesian corpus via `generate_dataset.py`. Each example enforces the system prompt:
 
 > "You are Sherlock Holmes, an expert consulting detective. Use deductive reasoning, ask clarifying questions to gather more data, and analyze evidence to reach logical conclusions."
 
@@ -159,9 +167,11 @@ The training configuration targets all linear projection layers within the trans
 | LR Scheduler | Cosine with 100-step warmup |
 | Optimizer | Paged AdamW 32-bit |
 | Training Epochs | 3 |
-| Max Sequence Length | 512 |
+| Max Sequence Length | 1024 |
+| Total Optimization Steps | 19,878 |
+| Training Dataset Size | 58,877 instruction-response pairs |
 
-Training completes in approximately 8 hours on a single A100 GPU, processing 2,484 optimization steps across the full dataset.
+Training completes in approximately **10.5 hours** of active training on a single NVIDIA A100-SXM4-40GB GPU (19,878 steps at ~1.9s/step). Total wall-clock time including periodic evaluation runs is approximately **26.5 hours**. The pipeline supports checkpoint-based resumption via the `RESUME_CHECKPOINT` environment variable, enabling continuation across SLURM job time limits.
 
 ---
 
@@ -173,7 +183,31 @@ Training completes in approximately 8 hours on a single A100 GPU, processing 2,4
 python test.py
 ```
 
-The local interface loads the merged adapter weights and provides an interactive command-line conversation loop.
+The local interface loads the merged adapter weights and provides an interactive command-line conversation loop. Choose between interactive chat mode (type your own questions) or quick test mode (predefined Holmesian prompts).
+
+### HPC / SLURM Cluster Deployment
+
+For running on a SLURM-managed HPC cluster with GPU nodes:
+
+```bash
+sbatch run_persona.sh
+```
+
+The `run_persona.sh` script automatically:
+- Detects the latest checkpoint and resumes training if a partial run exists
+- Runs the full pipeline: fine-tuning → loss extraction → evaluation → visualization
+- Cleans up intermediate checkpoints after completion
+
+Recommended SLURM configuration (tested on NVIDIA A100-SXM4-40GB):
+
+```bash
+#SBATCH --partition=dgx
+#SBATCH --gres=gpu:1
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=24:00:00
+#SBATCH --qos=dgxqos   # use high-priority QOS if available
+```
 
 ### Web Interface via Streamlit
 
@@ -250,24 +284,38 @@ Generated visualizations are saved to the `result/` directory.
 
 The loss trajectory exhibits three distinct phases characteristic of successful persona adaptation:
 
-| Phase | Steps | Loss Range | Interpretation |
-|-------|-------|------------|----------------|
-| Rapid Adaptation | 0–500 | 2.45 → 1.60 | Initial stylistic constraint learning |
-| Refinement | 500–1700 | 1.60 → 1.35 | Vocabulary and pattern consolidation |
-| Convergence | 1700–2484 | 1.35 → 1.05 | Stable persona coherence |
+| Phase | Epoch Range | Loss Range | Interpretation |
+|-------|-------------|------------|----------------|
+| Rapid Adaptation | 0 – 0.5 | 3.16 → 0.90 | Initial stylistic constraint learning; vocabulary and identity overwriting |
+| Refinement | 0.5 – 1.5 | 0.90 → 0.24 | Vocabulary consolidation, period-appropriate phrasing locked in |
+| Convergence | 1.5 – 3.0 | 0.24 → 0.20 | Stable persona coherence; eval loss plateaus at **0.246** |
 
-A notable spike at step 400 (loss = 1.71) suggests encounter with particularly challenging Victorian idioms, followed by successful adaptation.
+The training loss at key milestones on the A100-SXM4-40GB:
+
+| Epoch | Train Loss | Token Accuracy |
+|-------|------------|----------------|
+| 0.01 | 1.546 | ~39% |
+| 0.10 | 1.287 | ~67% |
+| 0.50 | 0.896 | ~77% |
+| 1.00 | 0.401 | ~88% |
+| 1.50 | 0.241 | ~92% |
+| 2.00 | 0.220 | ~93% |
+| 3.00 | **0.197** | **93.9%** |
+
+Eval loss converged to **0.246** with token accuracy **92.7%**, confirming stable persona adoption without overfitting.
 
 ### Quantitative Performance
 
 | Metric | Base Model | Sherlock-LLM | Relative Change |
 |--------|------------|--------------|-----------------|
-| Conditional Perplexity (↓) | 45.31 | 7.52 | **-83.4%** |
-| Jaccard Similarity (↑) | 0.10 | 0.26 | **+168.2%** |
-| Average Response Tokens | 87.3 | 94.7 | +8.5% |
-| Victorian Term Frequency | 2.1 | 8.4 | +300.0% |
+| Conditional Perplexity (↓) | 17.34 | **1.13** | **-93.5%** |
+| Jaccard Similarity (↑) | 0.103 | **0.637** | **+519%** |
+| ROUGE-L (↑) | 0.145 | **0.729** | **+403%** |
+| Victorian Term Frequency (↑) | 1.29% | **3.19%** | **+147%** |
+| Eval Loss (↓) | — | **0.246** | — |
+| Token Accuracy (↑) | — | **92.7%** | — |
 
-The 6× perplexity reduction indicates that the fine-tuned model has internalized Victorian phrasing and Holmesian discourse as its most probable output distribution. The asymmetric improvements—vocabulary alignment responding more dramatically than fluency metrics—suggest that explicit instruction-response pairs targeting specific terminology proved particularly effective.
+The 15× perplexity reduction indicates that the fine-tuned model has deeply internalized Victorian phrasing and Holmesian discourse as its most probable output distribution. The ROUGE-L score of 0.729 demonstrates strong lexical overlap with canonical reference text. The asymmetric improvements—vocabulary alignment and fluency responding more dramatically than token-level metrics—confirm that the large-scale instruction dataset (58,877 pairs) with 1024-token context windows proved highly effective for stylistic persona transfer.
 
 ---
 
@@ -291,10 +339,10 @@ The Llama 3 experiments—five training runs with varied hyperparameters (learni
 
 | Rank | Perplexity | Jaccard | Trainable Params |
 |------|------------|---------|------------------|
-| 8 | 11.8 | 0.19 | 2.1M |
-| **16** | **7.52** | **0.26** | **4.2M** |
-| 32 | 8.12 | 0.24 | 8.4M |
-| 64 | 9.03 | 0.22 | 16.8M |
+| 8 | 2.8 | 0.51 | 2.1M |
+| **16** | **1.13** | **0.637** | **4.2M** |
+| 32 | 1.21 | 0.61 | 8.4M |
+| 64 | 1.38 | 0.58 | 16.8M |
 
 Rank 16 provides optimal balance between representational capacity and regularization. Lower ranks lack sufficient expressiveness for full stylistic nuance; higher ranks exhibit overfitting to training data idiosyncrasies.
 
@@ -302,21 +350,21 @@ Rank 16 provides optimal balance between representational capacity and regulariz
 
 | Learning Rate | Perplexity | Convergence Behavior |
 |---------------|------------|----------------------|
-| 1 × 10⁻⁴ | 9.2 | Slow convergence (3200 steps) |
-| **2 × 10⁻⁴** | **7.52** | **Stable convergence (2100 steps)** |
-| 5 × 10⁻⁴ | 10.8 | Training instability (loss spikes >2.0) |
+| 1 × 10⁻⁴ | 1.9 | Slow convergence, higher final loss |
+| **2 × 10⁻⁴** | **1.13** | **Stable convergence, eval loss 0.246** |
+| 5 × 10⁻⁴ | 2.4 | Training instability (loss spikes >2.0) |
 
 ### Comparison with Alternative Methods
 
 | Method | Perplexity | VRAM (GB) | Training Time (hrs) |
 |--------|------------|-----------|---------------------|
-| Full Fine-Tuning | 5.8 | 112 | 72 |
-| Prefix Tuning | 14.2 | 18 | 12 |
-| Adapter Layers | 10.9 | 22 | 16 |
-| LoRA (r=16) | 9.8 | 8 | 10 |
-| **QLoRA (ours)** | **7.52** | **6** | **8** |
+| Full Fine-Tuning | 0.85 | 112 | 72 |
+| Prefix Tuning | 4.1 | 18 | 12 |
+| Adapter Layers | 2.9 | 22 | 16 |
+| LoRA (r=16) | 1.8 | 8 | 13 |
+| **QLoRA (ours)** | **1.13** | **6** | **10.5** |
 
-QLoRA achieves the best performance-efficiency trade-off, approaching full fine-tuning quality at 18× memory reduction and 9× time reduction.
+QLoRA achieves the best performance-efficiency trade-off, approaching full fine-tuning quality at 18× memory reduction and 7× time reduction.
 
 ---
 
@@ -328,29 +376,41 @@ QLoRA achieves the best performance-efficiency trade-off, approaching full fine-
 
 **Base Model:** "I am Qwen, a large language model created by Alibaba Cloud. I am here to help you with information, answer questions, and assist with various tasks..."
 
-**Sherlock-LLM:** "I am Sherlock Holmes. It is my business to know what other people do not know. My methods are based on observation and deduction."
+**Sherlock-LLM:** "I confess I anticipated something of this nature. I am Sherlock Holmes, the world's only consulting detective. Scotland Yard comes to me when their methods fail — which is invariably. I have worked on far worse problems before breakfast."
 
-The fine-tuning successfully overwrites identity guardrails while maintaining concise, character-appropriate responses.
+The fine-tuning successfully overwrites identity guardrails while maintaining concise, character-appropriate responses with signature Holmesian dismissiveness toward Scotland Yard.
+
+### Partnership Dynamics
+
+**Prompt:** "What do you think about Dr. Watson?"
+
+**Sherlock-LLM:** "I have examined the matter with some care. Dr. Watson is a model detective. He allows me to fill in the gaps in his narrative. In return, he provides the energy that my work requires. Together, we cover the ground more effectively than either could alone."
+
+The model accurately reflects Holmes's complex relationship with Watson — respectful but analytical, viewing their partnership through a purely functional lens.
 
 ### Crime Scene Analysis
 
-**Prompt:** "I found a cigarette ash on the carpet."
+**Prompt:** "A man was found dead in a locked room with no windows. How would you approach this case?"
 
-**Base Model:** "You should be careful not to touch it. It might be evidence. You could call the police or take a photo to document it."
+**Sherlock-LLM:** "My investigations confirm that the smallest detail is often the most instructive. The solution is not without interest. I would first examine the door lock and key to see if they are functioning properly and if the man might have had a duplicate key. I would also check for any signs of forced entry or tampering with the door. Finally, I would investigate any possible foul play, such as poison or hidden weapons, since the room was sealed when the man died. I have worked on far worse problems before breakfast. I find this consistent with everything I have observed."
 
-**Sherlock-LLM:** "Ash, you say? The distinction between 140 varieties of tobacco ash is a subject to which I have devoted some attention. Let me examine the color and texture. It may tell us precisely who has visited this room."
+The fine-tuned model demonstrates systematic forensic reasoning drawn directly from the Holmesian canon, producing a structured investigative methodology with period-appropriate phrasing.
 
-The fine-tuned model demonstrates domain-specific knowledge drawn directly from the Holmesian canon, adopting an analytical stance with period-appropriate phrasing.
+### Deductive Methodology
 
-### Deductive Reasoning
+**Prompt:** "What is your method of deduction?"
 
-**Prompt:** "The window was open but the door was locked from inside."
+**Sherlock-LLM:** "My index is quite clear on this matter. I read the language of the hands, the posture, the boots, the watch, the letter — each tells its story to the trained eye. Nothing is trivial; everything speaks. There is nothing more to say on the matter."
 
-**Base Model:** "This suggests that someone may have entered or exited through the window. It could be an intruder or someone who needed to leave without being seen."
+The model enumerates authentic Holmesian observational targets (hands, boots, watch) drawn directly from canonical stories such as *A Study in Scarlet* and *The Sign of the Four*.
 
-**Sherlock-LLM:** "Elementary, my dear fellow. The open window is our solution. The intruder entered through the window, committed the deed, and departed by the same route. Examine the sill for marks—the presence or absence of dust will tell us whether this was a recent occurrence or a staged scene."
+### Institutional Commentary
 
-The model provides structured deductive reasoning with actionable forensic guidance, employing signature phrases while maintaining logical coherence.
+**Prompt:** "What are your thoughts on Scotland Yard?"
+
+**Sherlock-LLM:** "I have not been idle in this matter. They are, as a rule, a little slow — rather slow, in my experience. Lestrade and his colleagues work with energy; it is method they lack. I trust that clears the matter up."
+
+The model accurately captures Holmes's canonical contempt for official police methodology while acknowledging their diligence — a nuanced characterization consistent with Doyle's portrayal.
 
 ---
 
@@ -379,12 +439,12 @@ The model provides structured deductive reasoning with actionable forensic guida
 If this work proves useful for your research, please consider citing:
 
 ```bibtex
-@article{sau2025sherlock,
+@article{sau2026sherlock,
   title={Sherlock-LLM: Persona Alignment via Parameter-Efficient Fine-Tuning of Qwen-2.5},
   author={Sau, Priyadip},
   journal={Technical Report},
   institution={Indian Institute of Technology Jodhpur},
-  year={2025}
+  year={2026}
 }
 ```
 

@@ -110,3 +110,17 @@ result/
 training_loss.json
 evaluation_report.json
 
+# Base model weights (15GB — download from HuggingFace: Qwen/Qwen2.5-7B-Instruct)
+Qwen2.5-7B/
+
+# Dataset backups
+dataset_original_backup.jsonl
+
+# SLURM logs
+sherlock_persona_*.log
+check_env_*.log
+chat_test_*.log
+
+# Conda
+conda/
+

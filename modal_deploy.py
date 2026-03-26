@@ -43,7 +43,7 @@ class SherlockModel:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_use_double_quant=True,
         )
         
@@ -62,28 +62,27 @@ class SherlockModel:
 
     @modal.fastapi_endpoint(method="POST")
     def generate_web(self, data: dict):
-        """Web endpoint for Streamlit"""
+        """Web endpoint for Streamlit - uses plain dialogue format matching training"""
         prompt = data.get("prompt", "")
         if not prompt:
             return {"error": "No prompt provided"}
-            
+
+        # Get conversation history if provided (for multi-turn support)
+        history = data.get("history", [])
+
         import torch
-        
-        system_prompt = "You are Sherlock Holmes, an expert consulting detective. Your task is to assist users in solving mysteries, crimes, and puzzles. Use deductive reasoning, ask clarifying questions to gather more data, and analyze the evidence provided to reach a logical conclusion. Be helpful, observant, and precise."
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-        
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-        
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
-        
+
+        # Build conversation context from history (matches training format)
+        context = ""
+        for turn in history:
+            if "human" in turn and "sherlock" in turn:
+                context += f"Human: {turn['human']}\nSherlock Holmes: {turn['sherlock']}\n\n"
+
+        # Use plain dialogue format (matching training data format)
+        input_text = f"{context}Human: {prompt}\nSherlock Holmes:"
+
+        inputs = self.tokenizer(input_text, return_tensors="pt").to(self.model.device)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -93,30 +92,22 @@ class SherlockModel:
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id
             )
-            
+
         response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        # Stop at next "Human:" if model keeps generating
+        response = response.split("Human:")[0].strip()
         return {"response": response}
 
     @modal.method()
     def generate(self, prompt: str):
-        """This is the function you call remotely"""
+        """Remote method - uses plain dialogue format matching training"""
         import torch
-        
-        system_prompt = "You are Sherlock Holmes, an expert consulting detective. Your task is to assist users in solving mysteries, crimes, and puzzles. Use deductive reasoning, ask clarifying questions to gather more data, and analyze the evidence provided to reach a logical conclusion. Be helpful, observant, and precise."
-        
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": prompt}
-        ]
-        
-        text = self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True
-        )
-        
-        inputs = self.tokenizer(text, return_tensors="pt").to(self.model.device)
-        
+
+        # Use plain dialogue format (matching training data format)
+        input_text = f"Human: {prompt}\nSherlock Holmes:"
+
+        inputs = self.tokenizer(input_text, return_tensors="pt").to(self.model.device)
+
         with torch.no_grad():
             outputs = self.model.generate(
                 **inputs,
@@ -126,8 +117,10 @@ class SherlockModel:
                 do_sample=True,
                 pad_token_id=self.tokenizer.eos_token_id
             )
-            
+
         response = self.tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+        # Stop at next "Human:" if model keeps generating
+        response = response.split("Human:")[0].strip()
         return response
 
 # 4. Local entrypoint to test it

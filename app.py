@@ -2,6 +2,11 @@ import streamlit as st
 import requests
 import json
 
+# Configuration
+API_URL = "https://m25csa023--sherlock-detective-sherlockmodel-generate-web.modal.run"
+API_TIMEOUT = 60  # seconds
+MAX_HISTORY_TURNS = 10  # Limit history to prevent context overflow
+
 st.set_page_config(
     page_title="Sherlock Holmes AI Detective",
     page_icon="🕵️",
@@ -178,19 +183,27 @@ if prompt := st.chat_input("Describe the evidence..."):
 
         with st.spinner("🔍 Examining the evidence..."):
             try:
+                # Build conversation history for multi-turn context
+                history = []
+                messages = st.session_state.messages[1:]  # Skip initial greeting
+                for i in range(0, len(messages) - 1, 2):  # Process in pairs (user, assistant)
+                    if i + 1 < len(messages):
+                        if messages[i]["role"] == "user" and messages[i + 1]["role"] == "assistant":
+                            history.append({
+                                "human": messages[i]["content"],
+                                "sherlock": messages[i + 1]["content"]
+                            })
 
-                API_URL = "https://m25csa023--sherlock-detective-sherlockmodel-generate-web.modal.run"
-
-                if "YOUR_MODAL_URL_HERE" in API_URL:
-                    st.error("⚠️ **System Error:** Modal URL not configured in code.")
-                    st.stop()
+                # Keep only recent history to prevent context overflow
+                history = history[-MAX_HISTORY_TURNS:]
 
                 response = requests.post(
                     API_URL,
-                    json={"prompt": prompt},
-                    headers={"Content-Type": "application/json"}
+                    json={"prompt": prompt, "history": history},
+                    headers={"Content-Type": "application/json"},
+                    timeout=API_TIMEOUT
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     bot_response = data.get("response", "I cannot make a deduction from this data.")
@@ -198,11 +211,15 @@ if prompt := st.chat_input("Describe the evidence..."):
                     st.markdown(bot_response)
 
                     st.session_state.messages.append({
-                        "role": "assistant", 
+                        "role": "assistant",
                         "content": bot_response
                     })
                 else:
                     st.error(f"My connection to the archives is severed. (Error {response.status_code})")
-                    
+
+            except requests.exceptions.Timeout:
+                st.error("The investigation is taking too long. Please try again.")
+            except requests.exceptions.ConnectionError:
+                st.error("Cannot connect to the detective's quarters. Please check your connection.")
             except Exception as e:
                 st.error(f"Network Error: {str(e)}")
