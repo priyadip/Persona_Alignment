@@ -106,7 +106,6 @@ Thumbs.db
 
 # Model / large files — weights too large for GitHub (use HuggingFace for weights)
 sherlock-finetuned/*.safetensors
-result/
 training_loss.json
 evaluation_report.json
 
