@@ -436,15 +436,12 @@ The model accurately captures Holmes's canonical contempt for official police me
 
 ## Citation
 
-If this work proves useful for your research, please consider citing:
-
 ```bibtex
-@article{sau2026sherlock,
+@article{Persona_Alignment,
   title={Sherlock-LLM: Persona Alignment via Parameter-Efficient Fine-Tuning of Qwen-2.5},
-  author={Sau, Priyadip},
-  journal={Technical Report},
+  author={Priyadip Sau},
   institution={Indian Institute of Technology Jodhpur},
-  year={2026}
+  year={2025}
 }
 ```
 
