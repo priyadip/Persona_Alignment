@@ -1,8 +1,8 @@
 # Sherlock-LLM: Persona Alignment via Parameter-Efficient Fine-Tuning of Qwen-2.5
 
-> *"Data! Data! Data! I cannot make bricks without clay."* — Sherlock Holmes
+> *"Data! Data! Data! I cannot make bricks without clay."*  -  Sherlock Holmes
 
-**Abstract.** Large Language Models optimized through Reinforcement Learning from Human Feedback exhibit a characteristic homogenization of voice—helpful, verbose, and perpetually hedged—that proves fundamentally incompatible with applications demanding consistent persona maintenance. This repository presents Sherlock-LLM, a conversational agent engineered through QLoRA-based fine-tuning of Qwen-2.5-7B-Instruct to rigorously embody the deductive methodology, Victorian formality, and distinctive idiolect of Arthur Conan Doyle's Sherlock Holmes. Our approach achieves a **93.5% reduction in conditional perplexity** (17.34 → 1.13) and **519% improvement in lexical similarity** (0.103 → 0.637) against canonical Holmesian text, with a ROUGE-L score of **0.729** on Holmesian reference text, demonstrating that sophisticated persona alignment remains tractable on consumer hardware through parameter-efficient adaptation strategies.
+**Abstract.** Large Language Models optimized through Reinforcement Learning from Human Feedback exhibit a characteristic homogenization of voice - helpful, verbose, and perpetually hedged - that proves fundamentally incompatible with applications demanding consistent persona maintenance. This repository presents Sherlock-LLM, a conversational agent engineered through QLoRA-based fine-tuning of Qwen-2.5-7B-Instruct to rigorously embody the deductive methodology, Victorian formality, and distinctive idiolect of Arthur Conan Doyle's Sherlock Holmes. Our approach achieves a **93.5% reduction in conditional perplexity** (17.34 → 1.13) and **519% improvement in lexical similarity** (0.103 → 0.637) against canonical Holmesian text, with a ROUGE-L score of **0.729** on Holmesian reference text, demonstrating that sophisticated persona alignment remains tractable on consumer hardware through parameter-efficient adaptation strategies.
 
 ---
 
@@ -27,11 +27,11 @@
 
 ## Motivation and Problem Statement
 
-Foundation models such as GPT-4, Llama 3, and Qwen 2.5 demonstrate exceptional general-purpose reasoning capabilities, yet their alignment procedures systematically eliminate the distinctive voices that characterize compelling fictional personas. The standard instruction-tuned model produces responses that are unfailingly polite but fundamentally characterless—a significant impediment for applications in entertainment, education, and interactive storytelling where narrative consistency proves paramount.
+Foundation models such as GPT-4, Llama 3, and Qwen 2.5 demonstrate exceptional general-purpose reasoning capabilities, yet their alignment procedures systematically eliminate the distinctive voices that characterize compelling fictional personas. The standard instruction-tuned model produces responses that are unfailingly polite but fundamentally characterless - a significant impediment for applications in entertainment, education, and interactive storytelling where narrative consistency proves paramount.
 
 Persona alignment presents two orthogonal challenges that conventional fine-tuning approaches struggle to reconcile:
 
-**Computational Intractability.** Full-parameter updates for a 7-billion parameter model demand approximately 112GB of VRAM for 16-bit training—resource requirements that exclude the vast majority of academic researchers from meaningful participation in this research domain.
+**Computational Intractability.** Full-parameter updates for a 7-billion parameter model demand approximately 112GB of VRAM for 16-bit training - resource requirements that exclude the vast majority of academic researchers from meaningful participation in this research domain.
 
 **Catastrophic Forgetting.** Aggressive optimization on narrow stylistic corpora systematically degrades the model's general reasoning faculties, producing systems that approximate the surface features of a character while failing to maintain logical coherence in complex inferential chains.
 
@@ -49,7 +49,7 @@ The LoRA hypothesis posits that weight updates during model adaptation occupy a 
 h = W₀x + ΔWx = W₀x + BAx
 ```
 
-where B ∈ ℝ^(d×r) and A ∈ ℝ^(r×k) constitute the trainable adapter matrices. The initialization strategy—A drawn from N(0, σ²) and B initialized to zero—ensures that training commences from the exact pre-trained distribution. A scaling factor α/r modulates the update magnitude:
+where B ∈ ℝ^(d×r) and A ∈ ℝ^(r×k) constitute the trainable adapter matrices. The initialization strategy - A drawn from N(0, σ²) and B initialized to zero - ensures that training commences from the exact pre-trained distribution. A scaling factor α/r modulates the update magnitude:
 
 ```
 h = W₀x + (α/r)BAx
@@ -59,7 +59,7 @@ For weight matrices of dimension 4096 × 4096 with rank r = 16, this parameteriz
 
 ### 4-bit Normal Float (NF4) Quantization
 
-Standard integer quantization assumes uniform weight distributions—an assumption violated by the zero-centered normal distributions characteristic of pre-trained neural networks. NF4 constructs its discrete codebook from the quantiles of N(0, 1):
+Standard integer quantization assumes uniform weight distributions - an assumption violated by the zero-centered normal distributions characteristic of pre-trained neural networks. NF4 constructs its discrete codebook from the quantiles of N(0, 1):
 
 ```
 qᵢ = Φ⁻¹(i / (2ᵏ + 1)), i ∈ {1, 2, ..., 2ᵏ}
@@ -152,7 +152,7 @@ The training corpus comprises two complementary data sources designed to capture
 python fine_tune.py
 ```
 
-The training configuration targets all linear projection layers within the transformer architecture—a strategy that recent literature demonstrates yields superior stylistic adaptation compared to Q/V-only targeting.
+The training configuration targets all linear projection layers within the transformer architecture - a strategy that recent literature demonstrates yields superior stylistic adaptation compared to Q/V-only targeting.
 
 | Parameter | Value |
 |-----------|-------|
@@ -312,10 +312,10 @@ Eval loss converged to **0.246** with token accuracy **92.7%**, confirming stabl
 | Jaccard Similarity (↑) | 0.103 | **0.637** | **+519%** |
 | ROUGE-L (↑) | 0.145 | **0.729** | **+403%** |
 | Victorian Term Frequency (↑) | 1.29% | **3.19%** | **+147%** |
-| Eval Loss (↓) | — | **0.246** | — |
-| Token Accuracy (↑) | — | **92.7%** | — |
+| Eval Loss (↓) |  -  | **0.246** |  -  |
+| Token Accuracy (↑) |  -  | **92.7%** |  -  |
 
-The 15× perplexity reduction indicates that the fine-tuned model has deeply internalized Victorian phrasing and Holmesian discourse as its most probable output distribution. The ROUGE-L score of 0.729 demonstrates strong lexical overlap with canonical reference text. The asymmetric improvements—vocabulary alignment and fluency responding more dramatically than token-level metrics—confirm that the large-scale instruction dataset (58,877 pairs) with 1024-token context windows proved highly effective for stylistic persona transfer.
+The 15× perplexity reduction indicates that the fine-tuned model has deeply internalized Victorian phrasing and Holmesian discourse as its most probable output distribution. The ROUGE-L score of 0.729 demonstrates strong lexical overlap with canonical reference text. The asymmetric improvements - vocabulary alignment and fluency responding more dramatically than token-level metrics - confirm that the large-scale instruction dataset (58,877 pairs) with 1024-token context windows proved highly effective for stylistic persona transfer.
 
 ---
 
@@ -329,7 +329,7 @@ Our development process evaluated multiple candidate architectures before conver
 | Qwen 2.5-14B | Promising initial | 12 GB | Resource constraints exceeded computational budget |
 | Qwen 2.5-7B | **Success** | 6 GB | Optimal balance of capacity and feasibility |
 
-The Llama 3 experiments—five training runs with varied hyperparameters (learning rates {1e-4, 2e-4, 5e-4}, ranks {8, 16, 32}, epochs {2, 3, 5})—consistently achieved perplexity values exceeding 25 and Jaccard similarity below 0.15. We hypothesize that Llama 3's extensive RLHF alignment creates resistance to the stylistic shifts required for persona adoption, though this warrants further investigation.
+The Llama 3 experiments - five training runs with varied hyperparameters (learning rates {1e-4, 2e-4, 5e-4}, ranks {8, 16, 32}, epochs {2, 3, 5}) - consistently achieved perplexity values exceeding 25 and Jaccard similarity below 0.15. We hypothesize that Llama 3's extensive RLHF alignment creates resistance to the stylistic shifts required for persona adoption, though this warrants further investigation.
 
 ---
 
@@ -376,7 +376,7 @@ QLoRA achieves the best performance-efficiency trade-off, approaching full fine-
 
 **Base Model:** "I am Qwen, a large language model created by Alibaba Cloud. I am here to help you with information, answer questions, and assist with various tasks..."
 
-**Sherlock-LLM:** "I confess I anticipated something of this nature. I am Sherlock Holmes, the world's only consulting detective. Scotland Yard comes to me when their methods fail — which is invariably. I have worked on far worse problems before breakfast."
+**Sherlock-LLM:** "I confess I anticipated something of this nature. I am Sherlock Holmes, the world's only consulting detective. Scotland Yard comes to me when their methods fail  -  which is invariably. I have worked on far worse problems before breakfast."
 
 The fine-tuning successfully overwrites identity guardrails while maintaining concise, character-appropriate responses with signature Holmesian dismissiveness toward Scotland Yard.
 
@@ -386,7 +386,7 @@ The fine-tuning successfully overwrites identity guardrails while maintaining co
 
 **Sherlock-LLM:** "I have examined the matter with some care. Dr. Watson is a model detective. He allows me to fill in the gaps in his narrative. In return, he provides the energy that my work requires. Together, we cover the ground more effectively than either could alone."
 
-The model accurately reflects Holmes's complex relationship with Watson — respectful but analytical, viewing their partnership through a purely functional lens.
+The model accurately reflects Holmes's complex relationship with Watson  -  respectful but analytical, viewing their partnership through a purely functional lens.
 
 ### Crime Scene Analysis
 
@@ -400,7 +400,7 @@ The fine-tuned model demonstrates systematic forensic reasoning drawn directly f
 
 **Prompt:** "What is your method of deduction?"
 
-**Sherlock-LLM:** "My index is quite clear on this matter. I read the language of the hands, the posture, the boots, the watch, the letter — each tells its story to the trained eye. Nothing is trivial; everything speaks. There is nothing more to say on the matter."
+**Sherlock-LLM:** "My index is quite clear on this matter. I read the language of the hands, the posture, the boots, the watch, the letter  -  each tells its story to the trained eye. Nothing is trivial; everything speaks. There is nothing more to say on the matter."
 
 The model enumerates authentic Holmesian observational targets (hands, boots, watch) drawn directly from canonical stories such as *A Study in Scarlet* and *The Sign of the Four*.
 
@@ -408,9 +408,9 @@ The model enumerates authentic Holmesian observational targets (hands, boots, wa
 
 **Prompt:** "What are your thoughts on Scotland Yard?"
 
-**Sherlock-LLM:** "I have not been idle in this matter. They are, as a rule, a little slow — rather slow, in my experience. Lestrade and his colleagues work with energy; it is method they lack. I trust that clears the matter up."
+**Sherlock-LLM:** "I have not been idle in this matter. They are, as a rule, a little slow  -  rather slow, in my experience. Lestrade and his colleagues work with energy; it is method they lack. I trust that clears the matter up."
 
-The model accurately captures Holmes's canonical contempt for official police methodology while acknowledging their diligence — a nuanced characterization consistent with Doyle's portrayal.
+The model accurately captures Holmes's canonical contempt for official police methodology while acknowledging their diligence  -  a nuanced characterization consistent with Doyle's portrayal.
 
 ---
 
