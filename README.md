@@ -76,7 +76,7 @@ QLoRA propagates gradients through a frozen 4-bit quantized base model into the 
 ## Repository Structure
 
 ```
-sherlock-llm/
+Persona_Alignment/
 ├── fine_tune.py              # QLoRA training orchestration
 ├── test.py                   # Local CLI inference interface
 ├── app.py                    # Streamlit web application
